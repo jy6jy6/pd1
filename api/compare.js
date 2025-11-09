@@ -23,11 +23,13 @@ export default async function handler(req, res) {
     const perpResponseData = await perpResponse.json();
     const perpData = perpResponseData.data || [];
 
-    // Create spot price map (symbol -> askPrice)
+    // Create spot price map (symbol -> bid and ask prices)
     // Spot symbols are like "BTCUSDT"
     const spotMap = new Map();
     spotData.forEach(item => {
       spotMap.set(item.symbol, {
+        bidPrice: parseFloat(item.bidPrice),
+        bidQty: parseFloat(item.bidQty),
         askPrice: parseFloat(item.askPrice),
         askQty: parseFloat(item.askQty)
       });
@@ -47,28 +49,26 @@ export default async function handler(req, res) {
       if (spotMap.has(spotSymbol)) {
         const spot = spotMap.get(spotSymbol);
         const perpBid = parseFloat(perp.bid1);
+        const perpAsk = parseFloat(perp.ask1);
+        const spotBid = spot.bidPrice;
         const spotAsk = spot.askPrice;
 
-        // Only process if both prices are valid and greater than 0
-        if (perpBid > 0 && spotAsk > 0) {
-          // Calculate spread using the formula:
-          // (perp best bid - spot best ask) / ((perp best bid + spot best ask) / 2) * 100
-          // Positive = perp bid higher (good for buy spot, short perp)
-          // Negative = spot ask higher (bad for this strategy)
-          const difference = perpBid - spotAsk;
-          const average = (perpBid + spotAsk) / 2;
-          const spreadPercent = (difference / average) * 100;
-
+        // Only process if all prices are valid and greater than 0
+        if (perpBid > 0 && perpAsk > 0 && spotBid > 0 && spotAsk > 0) {
           comparisons.push({
             symbol: spotSymbol,
             perpSymbol: perpSymbol,
+            // Spot prices
+            spotBid: spotBid,
             spotAsk: spotAsk,
-            perpBid: perpBid,
-            difference: difference,
-            spreadPercent: spreadPercent,
-            // Additional info
+            spotBidQty: spot.bidQty,
             spotAskQty: spot.askQty,
+            // Perp prices
+            perpBid: perpBid,
+            perpAsk: perpAsk,
             perpBidQty: parseFloat(perp.bidQty1 || 0),
+            perpAskQty: parseFloat(perp.askQty1 || 0),
+            // Additional info
             volume24h: parseFloat(perp.volume24 || 0),
             lastPrice: parseFloat(perp.lastPrice || 0)
           });
@@ -76,10 +76,7 @@ export default async function handler(req, res) {
       }
     });
 
-    // Sort by spread percentage (highest first)
-    comparisons.sort((a, b) => b.spreadPercent - a.spreadPercent);
-
-    // Return results
+    // Return results (frontend will calculate spreads based on selected mode)
     res.status(200).json({
       success: true,
       timestamp: new Date().toISOString(),
