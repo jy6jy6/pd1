@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MEXC Spot-Perp Arbitrage Finder</title>
+    <title>MEXC Spot-Perp Arbitrage Finder | Buy Spot Short Perp</title>
     <style>
         * {
             box-sizing: border-box;
@@ -195,12 +195,13 @@
     <div class="container">
         <div class="header">
             <h1>MEXC Spot-Perp Arbitrage Finder</h1>
-            <p>Buy Spot (Ask) → Sell Perp (Bid)</p>
+            <p>Buy Spot (Ask) → Short Perp (Bid)</p>
         </div>
 
         <div class="strategy-info">
-            <strong>Strategy:</strong> Buy on Spot Market (best ask) and simultaneously Sell on Perpetual Market (best bid)<br>
-            <strong>Formula:</strong> Spread % = |Perp Bid - Spot Ask| / ((Perp Bid + Spot Ask) / 2) × 100
+            <strong>Strategy:</strong> Buy on Spot Market (best ask) and simultaneously Short on Perpetual Market (best bid)<br>
+            <strong>Formula:</strong> Spread % = (Perp Bid - Spot Ask) / ((Perp Bid + Spot Ask) / 2) × 100<br>
+            <strong>Positive:</strong> Perp bid higher than spot ask (favorable) | <strong>Negative:</strong> Spot ask higher than perp bid (unfavorable)
         </div>
 
         <div class="stats">
@@ -350,7 +351,9 @@
             tbody.innerHTML = filteredData.map(item => `
                 <tr class="${item.spreadPercent > 1 ? 'highlight-row' : ''}">
                     <td class="symbol">${item.symbol}</td>
-                    <td class="number positive">${item.spreadPercent.toFixed(4)}%</td>
+                    <td class="number ${item.spreadPercent >= 0 ? 'positive' : 'negative'}">
+                        ${item.spreadPercent >= 0 ? '+' : ''}${item.spreadPercent.toFixed(4)}%
+                    </td>
                     <td class="number">${formatNumber(item.spotAsk)}</td>
                     <td class="number">${formatNumber(item.perpBid)}</td>
                     <td class="number ${item.difference >= 0 ? 'positive' : 'negative'}">
