@@ -52,10 +52,12 @@ export default async function handler(req, res) {
         // Only process if both prices are valid and greater than 0
         if (perpBid > 0 && spotAsk > 0) {
           // Calculate spread using the formula:
-          // |perp best bid - spot best ask| / ((perp best bid + spot best ask) / 2)
+          // (perp best bid - spot best ask) / ((perp best bid + spot best ask) / 2) * 100
+          // Positive = perp bid higher (good for buy spot, short perp)
+          // Negative = spot ask higher (bad for this strategy)
           const difference = perpBid - spotAsk;
           const average = (perpBid + spotAsk) / 2;
-          const spreadPercent = (Math.abs(difference) / average) * 100;
+          const spreadPercent = (difference / average) * 100;
 
           comparisons.push({
             symbol: spotSymbol,
