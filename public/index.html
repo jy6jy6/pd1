@@ -94,6 +94,27 @@
             background: #475569;
             cursor: not-allowed;
         }
+        .mode-btn {
+            background: #334155;
+            color: #94a3b8;
+            border: 2px solid #475569;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 600;
+            transition: all 0.2s;
+            margin: 0 5px;
+        }
+        .mode-btn:hover {
+            background: #3f4f66;
+            border-color: #60a5fa;
+        }
+        .mode-btn.active {
+            background: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+        }
         .controls input {
             background: #1e293b;
             border: 1px solid #334155;
@@ -195,13 +216,22 @@
     <div class="container">
         <div class="header">
             <h1>MEXC Spot-Perp Arbitrage Finder</h1>
-            <p>Buy Spot (Ask) → Short Perp (Bid)</p>
+            <p id="strategyTitle">Buy Spot (Ask) → Short Perp (Bid)</p>
         </div>
 
-        <div class="strategy-info">
+        <div class="strategy-selector" style="text-align: center; margin-bottom: 20px;">
+            <button id="mode1Btn" class="mode-btn active" onclick="switchMode('buySpotShortPerp')">
+                Buy Spot → Short Perp
+            </button>
+            <button id="mode2Btn" class="mode-btn" onclick="switchMode('sellSpotLongPerp')">
+                Sell Spot → Long Perp
+            </button>
+        </div>
+
+        <div class="strategy-info" id="strategyInfo">
             <strong>Strategy:</strong> Buy on Spot Market (best ask) and simultaneously Short on Perpetual Market (best bid)<br>
             <strong>Formula:</strong> Spread % = (Perp Bid - Spot Ask) / ((Perp Bid + Spot Ask) / 2) × 100<br>
-            <strong>Positive:</strong> Perp bid higher than spot ask (favorable) | <strong>Negative:</strong> Spot ask higher than perp bid (unfavorable)
+            <strong>Goal:</strong> Perp bid price should be higher than spot ask price (showing only positive spreads)
         </div>
 
         <div class="stats">
@@ -239,11 +269,11 @@
                     <tr>
                         <th class="sortable" onclick="sortTable('symbol')">Symbol</th>
                         <th class="sortable" onclick="sortTable('spreadPercent')">Spread %</th>
-                        <th class="sortable" onclick="sortTable('spotAsk')">Spot Ask</th>
-                        <th class="sortable" onclick="sortTable('perpBid')">Perp Bid</th>
+                        <th class="sortable" onclick="sortTable('price1')" id="header1">Spot Ask</th>
+                        <th class="sortable" onclick="sortTable('price2')" id="header2">Perp Bid</th>
                         <th class="sortable" onclick="sortTable('difference')">Difference</th>
-                        <th class="sortable" onclick="sortTable('spotAskQty')">Spot Ask Qty</th>
-                        <th class="sortable" onclick="sortTable('perpBidQty')">Perp Bid Qty</th>
+                        <th class="sortable" onclick="sortTable('qty1')" id="headerQty1">Spot Ask Qty</th>
+                        <th class="sortable" onclick="sortTable('qty2')" id="headerQty2">Perp Bid Qty</th>
                         <th class="sortable" onclick="sortTable('volume24h')">24h Volume</th>
                     </tr>
                 </thead>
@@ -254,11 +284,84 @@
     </div>
 
     <script>
-        let allData = [];
+        let rawData = [];
+        let processedData = [];
+        let currentMode = 'buySpotShortPerp'; // or 'sellSpotLongPerp'
         let sortColumn = 'spreadPercent';
         let sortDirection = 'desc';
         let autoRefreshInterval = null;
         let isAutoRefresh = false;
+
+        function switchMode(mode) {
+            currentMode = mode;
+
+            // Update button styles
+            document.getElementById('mode1Btn').classList.toggle('active', mode === 'buySpotShortPerp');
+            document.getElementById('mode2Btn').classList.toggle('active', mode === 'sellSpotLongPerp');
+
+            // Update UI text
+            if (mode === 'buySpotShortPerp') {
+                document.getElementById('strategyTitle').textContent = 'Buy Spot (Ask) → Short Perp (Bid)';
+                document.getElementById('strategyInfo').innerHTML =
+                    '<strong>Strategy:</strong> Buy on Spot Market (best ask) and simultaneously Short on Perpetual Market (best bid)<br>' +
+                    '<strong>Formula:</strong> Spread % = (Perp Bid - Spot Ask) / ((Perp Bid + Spot Ask) / 2) × 100<br>' +
+                    '<strong>Goal:</strong> Perp bid price should be higher than spot ask price (showing only positive spreads)';
+                document.getElementById('header1').textContent = 'Spot Ask';
+                document.getElementById('header2').textContent = 'Perp Bid';
+                document.getElementById('headerQty1').textContent = 'Spot Ask Qty';
+                document.getElementById('headerQty2').textContent = 'Perp Bid Qty';
+            } else {
+                document.getElementById('strategyTitle').textContent = 'Sell Spot (Bid) → Long Perp (Ask)';
+                document.getElementById('strategyInfo').innerHTML =
+                    '<strong>Strategy:</strong> Sell on Spot Market (best bid) and simultaneously Long on Perpetual Market (best ask)<br>' +
+                    '<strong>Formula:</strong> Spread % = (Spot Bid - Perp Ask) / ((Spot Bid + Perp Ask) / 2) × 100<br>' +
+                    '<strong>Goal:</strong> Spot bid price should be higher than perp ask price (showing only positive spreads)';
+                document.getElementById('header1').textContent = 'Spot Bid';
+                document.getElementById('header2').textContent = 'Perp Ask';
+                document.getElementById('headerQty1').textContent = 'Spot Bid Qty';
+                document.getElementById('headerQty2').textContent = 'Perp Ask Qty';
+            }
+
+            // Reprocess and render data
+            processData();
+            updateStats({ timestamp: new Date().toISOString() });
+            renderTable();
+        }
+
+        function processData() {
+            processedData = rawData.map(item => {
+                let price1, price2, qty1, qty2, difference, spreadPercent;
+
+                if (currentMode === 'buySpotShortPerp') {
+                    // Buy spot (pay ask), short perp (receive bid)
+                    price1 = item.spotAsk;
+                    price2 = item.perpBid;
+                    qty1 = item.spotAskQty;
+                    qty2 = item.perpBidQty;
+                    difference = item.perpBid - item.spotAsk;
+                } else {
+                    // Sell spot (receive bid), long perp (pay ask)
+                    price1 = item.spotBid;
+                    price2 = item.perpAsk;
+                    qty1 = item.spotBidQty;
+                    qty2 = item.perpAskQty;
+                    difference = item.spotBid - item.perpAsk;
+                }
+
+                const average = (price1 + price2) / 2;
+                spreadPercent = (difference / average) * 100;
+
+                return {
+                    ...item,
+                    price1,
+                    price2,
+                    qty1,
+                    qty2,
+                    difference,
+                    spreadPercent
+                };
+            }).filter(item => item.spreadPercent > 0); // Only show positive spreads
+        }
 
         async function loadData() {
             const refreshBtn = document.getElementById('refreshBtn');
@@ -284,7 +387,8 @@
                     throw new Error(result.error || 'Unknown error');
                 }
 
-                allData = result.data;
+                rawData = result.data;
+                processData();
                 updateStats(result);
                 renderTable();
 
@@ -303,15 +407,18 @@
         }
 
         function updateStats(result) {
-            document.getElementById('totalPairs').textContent = result.totalPairs;
+            document.getElementById('totalPairs').textContent = processedData.length;
 
-            if (result.data.length > 0) {
-                const spreads = result.data.map(d => d.spreadPercent);
+            if (processedData.length > 0) {
+                const spreads = processedData.map(d => d.spreadPercent);
                 const maxSpread = Math.max(...spreads);
                 const avgSpread = spreads.reduce((a, b) => a + b, 0) / spreads.length;
 
                 document.getElementById('maxSpread').textContent = maxSpread.toFixed(4) + '%';
                 document.getElementById('avgSpread').textContent = avgSpread.toFixed(4) + '%';
+            } else {
+                document.getElementById('maxSpread').textContent = '-';
+                document.getElementById('avgSpread').textContent = '-';
             }
 
             const time = new Date(result.timestamp);
@@ -324,7 +431,7 @@
             const minSpread = parseFloat(document.getElementById('minSpread').value) || 0;
 
             // Filter data
-            let filteredData = allData.filter(item => {
+            let filteredData = processedData.filter(item => {
                 const matchesSearch = item.symbol.includes(searchTerm);
                 const matchesSpread = item.spreadPercent >= minSpread;
                 return matchesSearch && matchesSpread;
@@ -351,16 +458,12 @@
             tbody.innerHTML = filteredData.map(item => `
                 <tr class="${item.spreadPercent > 1 ? 'highlight-row' : ''}">
                     <td class="symbol">${item.symbol}</td>
-                    <td class="number ${item.spreadPercent >= 0 ? 'positive' : 'negative'}">
-                        ${item.spreadPercent >= 0 ? '+' : ''}${item.spreadPercent.toFixed(4)}%
-                    </td>
-                    <td class="number">${formatNumber(item.spotAsk)}</td>
-                    <td class="number">${formatNumber(item.perpBid)}</td>
-                    <td class="number ${item.difference >= 0 ? 'positive' : 'negative'}">
-                        ${item.difference >= 0 ? '+' : ''}${formatNumber(item.difference)}
-                    </td>
-                    <td class="number">${formatNumber(item.spotAskQty)}</td>
-                    <td class="number">${formatNumber(item.perpBidQty)}</td>
+                    <td class="number positive">+${item.spreadPercent.toFixed(4)}%</td>
+                    <td class="number">${formatNumber(item.price1)}</td>
+                    <td class="number">${formatNumber(item.price2)}</td>
+                    <td class="number positive">+${formatNumber(item.difference)}</td>
+                    <td class="number">${formatNumber(item.qty1)}</td>
+                    <td class="number">${formatNumber(item.qty2)}</td>
                     <td class="number">${formatLargeNumber(item.volume24h)}</td>
                 </tr>
             `).join('');
@@ -386,11 +489,11 @@
             const columnMap = {
                 'symbol': 0,
                 'spreadPercent': 1,
-                'spotAsk': 2,
-                'perpBid': 3,
+                'price1': 2,
+                'price2': 3,
                 'difference': 4,
-                'spotAskQty': 5,
-                'perpBidQty': 6,
+                'qty1': 5,
+                'qty2': 6,
                 'volume24h': 7
             };
 
