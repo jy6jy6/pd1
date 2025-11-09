@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MEXC Spot-Perp Arbitrage Finder</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            padding: 10px;
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        @media (min-width: 768px) {
+            body {
+                padding: 20px;
+            }
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            color: #f1f5f9;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+        .header p {
+            color: #94a3b8;
+            margin: 5px 0;
+        }
+        .strategy-info {
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #3b82f6;
+        }
+        .strategy-info strong {
+            color: #60a5fa;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #1e293b;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #10b981;
+        }
+        .stat-label {
+            color: #94a3b8;
+            margin-top: 5px;
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .controls button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .controls button:hover {
+            background: #2563eb;
+        }
+        .controls button:disabled {
+            background: #475569;
+            cursor: not-allowed;
+        }
+        .controls input {
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            padding: 10px 15px;
+            border-radius: 6px;
+            font-size: 14px;
+            width: 200px;
+        }
+        .loading {
+            text-align: center;
+            padding: 50px;
+            font-size: 18px;
+            color: #94a3b8;
+        }
+        .error {
+            background: #7f1d1d;
+            color: #fecaca;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #dc2626;
+        }
+        .table-container {
+            background: #1e293b;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        thead {
+            background: #334155;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #f1f5f9;
+            white-space: nowrap;
+        }
+        th.sortable {
+            cursor: pointer;
+            user-select: none;
+        }
+        th.sortable:hover {
+            background: #3f4f66;
+        }
+        th.sortable::after {
+            content: ' ⇅';
+            opacity: 0.3;
+        }
+        th.sorted-asc::after {
+            content: ' ↑';
+            opacity: 1;
+        }
+        th.sorted-desc::after {
+            content: ' ↓';
+            opacity: 1;
+        }
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #334155;
+        }
+        tr:hover {
+            background: #273549;
+        }
+        .positive {
+            color: #34d399;
+        }
+        .negative {
+            color: #f87171;
+        }
+        .symbol {
+            font-weight: 600;
+            color: #60a5fa;
+        }
+        .number {
+            font-family: 'Courier New', monospace;
+        }
+        .highlight-row {
+            background: #1e3a5f !important;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .updating {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>MEXC Spot-Perp Arbitrage Finder</h1>
+            <p>Buy Spot (Ask) → Sell Perp (Bid)</p>
+        </div>
+
+        <div class="strategy-info">
+            <strong>Strategy:</strong> Buy on Spot Market (best ask) and simultaneously Sell on Perpetual Market (best bid)<br>
+            <strong>Formula:</strong> Spread % = |Perp Bid - Spot Ask| / ((Perp Bid + Spot Ask) / 2) × 100
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="totalPairs">-</div>
+                <div class="stat-label">Total Pairs</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="maxSpread">-</div>
+                <div class="stat-label">Max Spread %</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="avgSpread">-</div>
+                <div class="stat-label">Avg Spread %</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="lastUpdate">-</div>
+                <div class="stat-label">Last Update</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="refreshBtn" onclick="loadData()">Refresh Data</button>
+            <button id="toggleAutoRefresh" onclick="toggleAutoRefresh()">Auto-Refresh: OFF</button>
+            <input type="text" id="searchInput" placeholder="Search symbol..." onkeyup="filterTable()">
+            <input type="number" id="minSpread" placeholder="Min spread %" step="0.01" onchange="filterTable()">
+        </div>
+
+        <div id="error" class="error" style="display: none;"></div>
+        <div id="loading" class="loading">Loading data...</div>
+
+        <div class="table-container" id="tableContainer" style="display: none;">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="sortable" onclick="sortTable('symbol')">Symbol</th>
+                        <th class="sortable" onclick="sortTable('spreadPercent')">Spread %</th>
+                        <th class="sortable" onclick="sortTable('spotAsk')">Spot Ask</th>
+                        <th class="sortable" onclick="sortTable('perpBid')">Perp Bid</th>
+                        <th class="sortable" onclick="sortTable('difference')">Difference</th>
+                        <th class="sortable" onclick="sortTable('spotAskQty')">Spot Ask Qty</th>
+                        <th class="sortable" onclick="sortTable('perpBidQty')">Perp Bid Qty</th>
+                        <th class="sortable" onclick="sortTable('volume24h')">24h Volume</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let allData = [];
+        let sortColumn = 'spreadPercent';
+        let sortDirection = 'desc';
+        let autoRefreshInterval = null;
+        let isAutoRefresh = false;
+
+        async function loadData() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            const tableContainer = document.getElementById('tableContainer');
+
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = 'Loading...';
+            refreshBtn.classList.add('updating');
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            tableContainer.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/compare');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const result = await response.json();
+
+                if (!result.success) {
+                    throw new Error(result.error || 'Unknown error');
+                }
+
+                allData = result.data;
+                updateStats(result);
+                renderTable();
+
+                loading.style.display = 'none';
+                tableContainer.style.display = 'block';
+            } catch (err) {
+                console.error('Error loading data:', err);
+                error.textContent = `Error: ${err.message}`;
+                error.style.display = 'block';
+                loading.style.display = 'none';
+            } finally {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = 'Refresh Data';
+                refreshBtn.classList.remove('updating');
+            }
+        }
+
+        function updateStats(result) {
+            document.getElementById('totalPairs').textContent = result.totalPairs;
+
+            if (result.data.length > 0) {
+                const spreads = result.data.map(d => d.spreadPercent);
+                const maxSpread = Math.max(...spreads);
+                const avgSpread = spreads.reduce((a, b) => a + b, 0) / spreads.length;
+
+                document.getElementById('maxSpread').textContent = maxSpread.toFixed(4) + '%';
+                document.getElementById('avgSpread').textContent = avgSpread.toFixed(4) + '%';
+            }
+
+            const time = new Date(result.timestamp);
+            document.getElementById('lastUpdate').textContent = time.toLocaleTimeString();
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('tableBody');
+            const searchTerm = document.getElementById('searchInput').value.toUpperCase();
+            const minSpread = parseFloat(document.getElementById('minSpread').value) || 0;
+
+            // Filter data
+            let filteredData = allData.filter(item => {
+                const matchesSearch = item.symbol.includes(searchTerm);
+                const matchesSpread = item.spreadPercent >= minSpread;
+                return matchesSearch && matchesSpread;
+            });
+
+            // Sort data
+            filteredData.sort((a, b) => {
+                let aVal = a[sortColumn];
+                let bVal = b[sortColumn];
+
+                if (typeof aVal === 'string') {
+                    aVal = aVal.toLowerCase();
+                    bVal = bVal.toLowerCase();
+                }
+
+                if (sortDirection === 'asc') {
+                    return aVal > bVal ? 1 : -1;
+                } else {
+                    return aVal < bVal ? 1 : -1;
+                }
+            });
+
+            // Render rows
+            tbody.innerHTML = filteredData.map(item => `
+                <tr class="${item.spreadPercent > 1 ? 'highlight-row' : ''}">
+                    <td class="symbol">${item.symbol}</td>
+                    <td class="number positive">${item.spreadPercent.toFixed(4)}%</td>
+                    <td class="number">${formatNumber(item.spotAsk)}</td>
+                    <td class="number">${formatNumber(item.perpBid)}</td>
+                    <td class="number ${item.difference >= 0 ? 'positive' : 'negative'}">
+                        ${item.difference >= 0 ? '+' : ''}${formatNumber(item.difference)}
+                    </td>
+                    <td class="number">${formatNumber(item.spotAskQty)}</td>
+                    <td class="number">${formatNumber(item.perpBidQty)}</td>
+                    <td class="number">${formatLargeNumber(item.volume24h)}</td>
+                </tr>
+            `).join('');
+
+            updateSortIndicators();
+        }
+
+        function sortTable(column) {
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'desc';
+            }
+            renderTable();
+        }
+
+        function updateSortIndicators() {
+            document.querySelectorAll('th.sortable').forEach(th => {
+                th.classList.remove('sorted-asc', 'sorted-desc');
+            });
+
+            const columnMap = {
+                'symbol': 0,
+                'spreadPercent': 1,
+                'spotAsk': 2,
+                'perpBid': 3,
+                'difference': 4,
+                'spotAskQty': 5,
+                'perpBidQty': 6,
+                'volume24h': 7
+            };
+
+            const index = columnMap[sortColumn];
+            if (index !== undefined) {
+                const th = document.querySelectorAll('th.sortable')[index];
+                th.classList.add(`sorted-${sortDirection}`);
+            }
+        }
+
+        function filterTable() {
+            renderTable();
+        }
+
+        function toggleAutoRefresh() {
+            const btn = document.getElementById('toggleAutoRefresh');
+            isAutoRefresh = !isAutoRefresh;
+
+            if (isAutoRefresh) {
+                btn.textContent = 'Auto-Refresh: ON (30s)';
+                btn.style.background = '#10b981';
+                autoRefreshInterval = setInterval(loadData, 30000);
+            } else {
+                btn.textContent = 'Auto-Refresh: OFF';
+                btn.style.background = '#3b82f6';
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            }
+        }
+
+        function formatNumber(num) {
+            if (num === 0) return '0';
+            if (num < 0.00001) return num.toExponential(4);
+            if (num < 1) return num.toFixed(8);
+            if (num < 100) return num.toFixed(6);
+            return num.toFixed(2);
+        }
+
+        function formatLargeNumber(num) {
+            if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
+            if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
+            if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';
+            return num.toFixed(2);
+        }
+
+        // Load data on page load
+        loadData();
+    </script>
+</body>
+</html>
